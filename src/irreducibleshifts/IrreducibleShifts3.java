@@ -130,7 +130,7 @@ public final class IrreducibleShifts3 {
                                                             requiredSeeds[k] = seed;
                                                         }
                                                     }
-                                                    //continue;
+                                                    continue;
                                                 }
                                             }
                                         }
