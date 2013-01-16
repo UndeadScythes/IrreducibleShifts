@@ -15,7 +15,12 @@ public final class IrreducibleShifts3 {
         final int low = ArgUtils.getInt(args, "-l", 0);
         final int high = ArgUtils.getInt(args, "-h", 0);
         final boolean optimise = ArgUtils.getBool(args, "-o");
-        for(int n = low; n <= high; n++) {
+        //test1(low, high, optimise);
+        test2(low, high);
+    }
+
+    private static void test1(final int low, final int high, final boolean optimise) throws IOException {
+            for(int n = low; n <= high; n++) {
             final File file = new File("IrreducibleShifts2-" + n + ".csv");
             final BufferedWriter out = new BufferedWriter(new FileWriter(file));
             out.write("n,f,d,q,g,dec seqs,class reps,trace seqs,dec classes,dec phases,seeds,seed count\n");
@@ -101,7 +106,8 @@ public final class IrreducibleShifts3 {
                             int[] phases = new int[n];
                             int seed = 1;
                             final int[] requiredSeeds = new int[q];
-                            while(seed <= N) {
+                            int seedsFound = 0;
+                            while(seed <= N && seedsFound != q) {
                                 lfsrSeqSnap = new Sequence[n];
                                 lfsrSeqClasses = new Polynomial[n];
                                 phases = new int[n];
@@ -128,6 +134,7 @@ public final class IrreducibleShifts3 {
                                                     for(int k = 0; k < q; k++) {
                                                         if(requiredSeeds[k] == 0 && decSeqClasses[k].equalTo(lfsrSeqClasses[i]) && decSeqPhases[k] == phases[i]) {
                                                             requiredSeeds[k] = seed;
+                                                            seedsFound++;
                                                         }
                                                     }
                                                     continue;
@@ -156,6 +163,90 @@ public final class IrreducibleShifts3 {
                 f = PolynomialUtils.getPrimitive(n, f.nextPoly().toInt());
             }
         out.close();
+        }
+    }
+
+    private static void test2(final int low, final int high) throws IOException {
+        for(int n = low; n <= high; n++) {
+            final File file = new File("IrredTest-" + n + ".csv");
+            final BufferedWriter out = new BufferedWriter(new FileWriter(file));
+            out.write("degree,N,g,d,q,sample,alpha,seqs,seeds,classes,shifts\n");
+            final int N = (1 << n) - 1;
+            System.out.println("n:" + n + "\tN:" + N);
+            Polynomial g = PolynomialUtils.getStrictIrreducible(n, 0);
+            if(g == null) {
+                out.close();
+                file.delete();
+            }
+            while(g != null) {
+                final int d = g.getOrder();
+                final int q = N / d;
+                System.out.println(" g:" + g.toString("x") + "\td:" + d + "\tq:" + q);
+                Polynomial alpha = g.getPrimitiveRoot();
+                GaloisLFSR lfsr = new GaloisLFSR(n, g, 1);
+                final Sequence[] sampleSeqs = new Sequence[n];
+                long start = System.currentTimeMillis();
+                for(int i = 0; i < d * 2; i++) {
+                    for(int j = 0; j < n; j++) {
+                        if(i == 0) {
+                            sampleSeqs[j] = new Sequence(d * 2);
+                        }
+                        sampleSeqs[j].setElement(i, lfsr.getBit(j));
+                    }
+                    lfsr.clock();
+                }
+                System.out.println(" sample:{" + ArrayUtils.join(sampleSeqs, d, ", ") + "}\ttime:" + (System.currentTimeMillis() - start) + "ms");
+                while(alpha != null) {
+                    System.out.println("  a:" + alpha.toString("b"));
+                    int seed = 1;
+                    final int[] seeds = new int[q];
+                    final Sequence[] seqs = new Sequence[q];
+                    start = System.currentTimeMillis();
+                    for(int seedNo = 0; seedNo < q; seedNo++) {
+                        seeds[seedNo] = seed;
+                        lfsr = new GaloisLFSR(n, g, seed);
+                        seed = 0;
+                        for(int i = 0; i < d; i++) {
+                            if(i < n) {
+                                seed ^= alpha.getCoeff(i) * lfsr.getState();
+                            }
+                            if(i == 0) {
+                                seqs[seedNo] = new Sequence(d);
+                            }
+                            seqs[seedNo].setElement(i, lfsr.getBit(n - 1));
+                            lfsr.clock();
+                        }
+                    }
+
+                    final int[] shiftSeqs = new int[n];
+                    final int[] shifts = new int[n];
+                    for(int i = 0; i < n; i++) {
+                        for(int j = 0; j < q; j++) {
+                            final int temp = sampleSeqs[i].find(seqs[j]);
+                            if(temp > -1) {
+                                shiftSeqs[i] = j;
+                                shifts[i] = (d - temp) % d;
+                            }
+                        }
+                    }
+                    System.out.println("   seqs:{" + ArrayUtils.join(seqs, d, ", ") + "}" + "\tseeds:{" + ArrayUtils.joinBinary(seeds, n, ", ") + "}");
+                    System.out.println("   classes:{" + ArrayUtils.join(shiftSeqs, ", ") + "}\tshifts(<<):{" + ArrayUtils.join(shifts, ", ") + "}\ttime:" + (System.currentTimeMillis() - start) + "ms");
+
+                    final Sequence mSeq = new Sequence(N);
+                    for(int i = 0; i < d; i++) {
+                        for(int j = 0; j < q; j++) {
+                            mSeq.setElement(i * q + j, seqs[j].getElement(i));
+                        }
+                    }
+                    System.out.println("   interleaved:" + mSeq.toString() + "\tf:" + mSeq.getMinimal().toString("x"));
+
+                    out.write(n + "," + N + "," + g.toBinary() + "," + d + "," + q + "," + ArrayUtils.join(sampleSeqs, n, " ") + "," + alpha.toBinary() + "," + ArrayUtils.join(seqs, n, " ") + "," + ArrayUtils.joinBinary(seeds, n, " ") + "," + ArrayUtils.join(shiftSeqs, " ") + "," + ArrayUtils.join(shifts, " ") + "\n");
+
+                    alpha = g.getPrimitiveRoot(alpha);
+                }
+                g = PolynomialUtils.getStrictIrreducible(n, g.nextPoly().toInt());
+            }
+            out.close();
         }
     }
 }
