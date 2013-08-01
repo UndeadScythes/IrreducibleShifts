@@ -55,7 +55,7 @@ public final class IrreducibleShifts3 {
                                 lfsrF.clock();
                             }
                         }
-                        final Polynomial alpha = g.getPrimitiveRoot();
+                        final Polynomial alpha = g.getStrictPrimitiveRoot();
                         final List<Polynomial> classReps = g.getClassReps(alpha);
                         final List<Sequence> classRepTraces = new ArrayList<Sequence>();
                         for(int i = 0; i < q; i++) {
@@ -167,12 +167,14 @@ public final class IrreducibleShifts3 {
     }
 
     private static void test2(final int low, final int high) throws IOException {
+        final File masterFile = new File("IrredTest2.tsv");
+        final BufferedWriter masterOut = new BufferedWriter(new FileWriter(masterFile));
+        masterOut.write("n\tmax galois comb\tmax fibonacci comb\tg interleave\tf interleave\ttable1\ttable2\n");
         for(int n = low; n <= high; n++) {
-            final File file = new File("IrredTest-" + n + ".csv");
+            final File file = new File("IrredTest2-" + n + ".csv");
             final BufferedWriter out = new BufferedWriter(new FileWriter(file));
-            out.write("degree,N,g,d,q,sample,alpha,seqs,seeds,classes,shifts\n");
+            out.write("n,g,d,q,alpha,f,classes,shifts,fib seqs,sample seqs,max galois comb,max fibonacci comb,galois interleave, fibonacci interleave\n");
             final int N = (1 << n) - 1;
-            System.out.println("n:" + n + "\tN:" + N);
             Polynomial g = PolynomialUtils.getStrictIrreducible(n, 0);
             if(g == null) {
                 out.close();
@@ -181,11 +183,10 @@ public final class IrreducibleShifts3 {
             while(g != null) {
                 final int d = g.getOrder();
                 final int q = N / d;
-                System.out.println(" g:" + g.toString("x") + "\td:" + d + "\tq:" + q);
-                Polynomial alpha = g.getPrimitiveRoot();
+                Polynomial alpha = g.getStrictPrimitiveRoot();
                 GaloisLFSR lfsr = new GaloisLFSR(n, g, 1);
                 final Sequence[] sampleSeqs = new Sequence[n];
-                long start = System.currentTimeMillis();
+
                 for(int i = 0; i < d * 2; i++) {
                     for(int j = 0; j < n; j++) {
                         if(i == 0) {
@@ -195,13 +196,10 @@ public final class IrreducibleShifts3 {
                     }
                     lfsr.clock();
                 }
-                System.out.println(" sample:{" + ArrayUtils.join(sampleSeqs, d, ", ") + "}\ttime:" + (System.currentTimeMillis() - start) + "ms");
                 while(alpha != null) {
-                    System.out.println("  a:" + alpha.toString("b"));
                     int seed = 1;
                     final int[] seeds = new int[q];
                     final Sequence[] seqs = new Sequence[q];
-                    start = System.currentTimeMillis();
                     for(int seedNo = 0; seedNo < q; seedNo++) {
                         seeds[seedNo] = seed;
                         lfsr = new GaloisLFSR(n, g, seed);
@@ -218,19 +216,28 @@ public final class IrreducibleShifts3 {
                         }
                     }
 
-                    final int[] shiftSeqs = new int[n];
+                    final int[] classes = new int[n];
                     final int[] shifts = new int[n];
                     for(int i = 0; i < n; i++) {
                         for(int j = 0; j < q; j++) {
                             final int temp = sampleSeqs[i].find(seqs[j]);
                             if(temp > -1) {
-                                shiftSeqs[i] = j;
+                                classes[i] = j;
                                 shifts[i] = (d - temp) % d;
                             }
                         }
                     }
-                    System.out.println("   seqs:{" + ArrayUtils.join(seqs, d, ", ") + "}" + "\tseeds:{" + ArrayUtils.joinBinary(seeds, n, ", ") + "}");
-                    System.out.println("   classes:{" + ArrayUtils.join(shiftSeqs, ", ") + "}\tshifts(<<):{" + ArrayUtils.join(shifts, ", ") + "}\ttime:" + (System.currentTimeMillis() - start) + "ms");
+
+                    final int[] sums = new int[q];
+                    int maxSumG = 0;
+                    for(int i = 0; i < q; i++) {
+                        for(int j = 1; j < n; j++) {
+                            sums[i] += seqs[i].getElement(j - 1);
+                        }
+                        if(sums[i] > maxSumG) {
+                            maxSumG = sums[i];
+                        }
+                    }
 
                     final Sequence mSeq = new Sequence(N);
                     for(int i = 0; i < d; i++) {
@@ -238,11 +245,111 @@ public final class IrreducibleShifts3 {
                             mSeq.setElement(i * q + j, seqs[j].getElement(i));
                         }
                     }
-                    System.out.println("   interleaved:" + mSeq.toString() + "\tf:" + mSeq.getMinimal().toString("x"));
+                    final Polynomial f = mSeq.getMinimal();
 
-                    out.write(n + "," + N + "," + g.toBinary() + "," + d + "," + q + "," + ArrayUtils.join(sampleSeqs, n, " ") + "," + alpha.toBinary() + "," + ArrayUtils.join(seqs, n, " ") + "," + ArrayUtils.joinBinary(seeds, n, " ") + "," + ArrayUtils.join(shiftSeqs, " ") + "," + ArrayUtils.join(shifts, " ") + "\n");
+                    final GaloisLFSR glfsr = new GaloisLFSR(n, f, 1);
+                    final Sequence[] sseqs = new Sequence[q];
+                    for(int i = 0; i < n; i++) {
+                        for(int j = 0; j < q; j++) {
+                            if(i == 0) {
+                                sseqs[j] = new Sequence(n);
+                            }
+                            sseqs[j].setElement(i, glfsr.getOutput());
+                            glfsr.clock();
+                        }
 
-                    alpha = g.getPrimitiveRoot(alpha);
+                    }
+
+                    int maxg = 0;
+                    for(int i = 0; i < q; i++) {
+                        if(sseqs[i].weight() > maxg) {
+                            maxg = sseqs[i].weight();
+                        }
+                    }
+
+                    final FibonacciLFSR flfsr = new FibonacciLFSR(n, g, 1 << n - 1);
+                    final Sequence[] fseqs = new Sequence[n];
+                    for(int i = 0; i < n; i++) {
+                        for(int j = 0; j < n; j++) {
+                            if(i == 0) {
+                                fseqs[j] = new Sequence(n);
+                            }
+                            fseqs[j].setElement(i, flfsr.getBit(j));
+                        }
+                        flfsr.clock();
+                    }
+
+                    String ginterleave = "";
+                    for(int i = 0; i < q; i++) {
+                        for(int j = 0; j < n; j++) {
+                            if(sseqs[i].getElement(j) == 1) {
+                                ginterleave = ginterleave.concat("R^{(" + j + ")}\\oplus ");
+                            }
+                        }
+                        ginterleave = ginterleave.concat(",");
+                    }
+                    ginterleave = ginterleave.concat("X").replace("\\oplus ,", ",").replace(",X", "");
+
+                    String finterleave = "";
+                    int maxf = 0;
+                    for(int i = 0; i < q; i++) {
+                        int currentf = 0;
+                        Sequence current = sseqs[i].copy();
+                        for(int j = 0; j < n; j++) {
+                            if(current.getElement(j) == 1) {
+                                finterleave = finterleave.concat("Q^{(" + (n - 1 - j) + ")}\\oplus ");
+                                current.xor(fseqs[n - 1 - j]);
+                                currentf++;
+                            }
+                        }
+                        finterleave = finterleave.concat(",");
+                        if(currentf > maxf) {
+                            maxf = currentf;
+                        }
+                    }
+                    finterleave = finterleave.concat("X").replace("\\oplus ,", ",").replace(",X", "");
+
+                    System.out.println("   n:" + n +
+                                        "\tg:" + g.toString() +
+                                        "\td:" + d +
+                                        "\tq:" + q +
+                                        "\ta:" + alpha.toString() +
+                                        "\tf:" + f.toBinary() +
+                                 "\tclasses:{" + ArrayUtils.join(classes, ", ") + "}" +
+                              "\tshifts(<<):{" + ArrayUtils.join(shifts, ", ") + "}" +
+                                   "\tFSeqs:{" + ArrayUtils.join(fseqs, ", ") + "}" +
+                                   "\tSSeqs:{" + ArrayUtils.join(sseqs, ", ") + "}" +
+                                    "\tmax g:" + maxg +
+                                    "\tmax f:" + maxf +
+                                      "\tGIL:" + ginterleave +
+                                      "\tFIL:" + finterleave);
+                    out.write(n + "," +
+                              g.toBinary() + "," +
+                              d + "," +
+                              q + "," +
+                              alpha.toBinary() + "," +
+                              f.toString() + "," +
+                              ArrayUtils.join(classes, " ") + "," +
+                              ArrayUtils.join(shifts, " ") + "," +
+                              ArrayUtils.join(fseqs, " ") + "," +
+                              ArrayUtils.join(sseqs, " ") + "," +
+                              maxg + "," +
+                              maxf + "," +
+                              ginterleave.replace(",", ";") + "," +
+                              finterleave.replace(",", ";") + "\n");
+
+                    masterOut.write(n + "\t" +
+                              maxg + "\t" +
+                              maxf + "\t" +
+                              ginterleave + "\t" +
+                              finterleave + "\t" +
+                              "\\hline$n=" + n + "$ & $g=" + g.toBinary() + "$ & $d=" + d + "$ & $q=" + q + "$ & $\\alpha=" + alpha.toBinary() + "$ & $f=" + f.toBinary() + "$\\\\" +
+                              "\\multicolumn{2}{|l}{Classes: $(" + ArrayUtils.join(classes, ",") + ")$} & \\multicolumn{3}{l}{Shifts: $(" + ArrayUtils.join(shifts, ",") + ")$} & XORs: \\\\" +
+                              "\\multicolumn{6}{|l|}{Interleave: $" + ginterleave + "$}\\\\" + "\t" +
+                              "\\hline$n=" + n + "$ & $g=" + g.toBinary() + "$ & $d=" + d + "$ & $q=" + q + "$ & $\\alpha=" + alpha.toBinary() + "$ & $f=" + f.toBinary() + "$ & XORs: \\\\" +
+                              "\\multicolumn{7}{|l|}{Interleave: $" + finterleave + "$}\\\\" + "\n");
+
+                    alpha = g.getStrictPrimitiveRoot(alpha);
                 }
                 g = PolynomialUtils.getStrictIrreducible(n, g.nextPoly().toInt());
             }
